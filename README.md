@@ -35,3 +35,42 @@ curl -X 'POST' \
 ![image](https://github.com/user-attachments/assets/1234e382-2b2c-4859-af78-c72ed7046a13)
 
 Здесь вы и собеседник подключаетесь к 1 чату, номер которого введете и можете в режиме реального времени обмениваться сообщениями.
+Маршрут получения истории собщений конкретного чата
+```http
+curl -X 'GET' \
+  'http://localhost:8000/history/1?limit=50&offset=0' \
+  -H 'accept: application/json'
+```
+И пример вывода
+```json
+[
+  {
+    "message_id": 1,
+    "sender_id": 1,
+    "text": "test",
+    "timestamp": "2025-03-12T08:59:00.343435",
+    "read": false
+  },
+  {
+    "message_id": 2,
+    "sender_id": 1,
+    "text": "test",
+    "timestamp": "2025-03-12T08:59:04.037063",
+    "read": false
+  },
+  {
+    "message_id": 3,
+    "sender_id": 1,
+    "text": "message 3",
+    "timestamp": "2025-03-12T08:59:06.848707",
+    "read": false
+  },
+  {
+    "message_id": 4,
+    "sender_id": 1,
+    "text": "message 4",
+    "timestamp": "2025-03-12T08:59:09.541231",
+    "read": false
+  }
+]
+```
