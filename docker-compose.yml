@@ -30,7 +30,6 @@ services:
     command: pytest --maxfail=1 --disable-warnings -q
     volumes:
       - ./app:/app
-      - ./tests:/tests
     env_file:
       - .env.docker
     depends_on:
