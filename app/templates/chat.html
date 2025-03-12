@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket Chat</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .chat-controls {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 10px;
+    }
+    #chatIdInput {
+      padding: 8px;
+      width: 120px;
+    }
+    button {
+      padding: 8px 16px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    #messages {
+      list-style-type: none;
+      padding: 0;
+      margin: 20px 0;
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    #messages li {
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #messages li:last-child {
+      border-bottom: none;
+    }
+    .message-status {
+      font-size: 0.8em;
+      margin-left: 10px;
+    }
+    .status-read {
+      color: green;
+    }
+    .status-unread {
+      color: red;
+    }
+    form {
+      display: flex;
+      gap: 10px;
+    }
+    #messageText {
+      flex-grow: 1;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .status {
+      color: #666;
+      font-size: 0.9em;
+      margin-top: 10px;
+    }
+    #activeUsers {
+      font-weight: bold;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>WebSocket Chat</h1>
+
+  <div class="chat-controls">
+    <input type="number" id="chatIdInput" placeholder="ID чата" min="1" required>
+    <button onclick="connectWebSocket()">Подключиться</button>
+  </div>
+
+  <div class="status">
+    Текущий чат: <span id="ws-id">не подключен</span>
+  </div>
+
+  <div>
+    Активные участники: <span id="activeUsers">нет данных</span>
+  </div>
+
+  <ul id="messages"></ul>
+
+  <form onsubmit="sendMessage(event)">
+    <input type="text" id="messageText" autocomplete="off" placeholder="Введите сообщение" disabled>
+    <button type="submit" id="sendButton" disabled>Отправить</button>
+  </form>
+
+  <script>
+    let ws = null;
+    let currentChatId = null;
+    let currentUserEmail = null;
+
+    function getAuthToken() {
+      const cookie = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('auth_token='));
+      if (!cookie) {
+        alert('Ошибка авторизации! Пожалуйста, войдите в систему.');
+        window.location.href = '/login';
+        return null;
+      }
+      return cookie.split('=')[1];
+    }
+
+    function parseJwt(token) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('')
+          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join(''));
+        return JSON.parse(jsonPayload);
+      } catch (e) {
+        console.error('Ошибка декодирования JWT:', e);
+        return null;
+      }
+    }
+
+    function connectWebSocket() {
+      const chatId = document.getElementById('chatIdInput').value;
+      if (!chatId) {
+        alert('Пожалуйста, введите ID чата!');
+        return;
+      }
+
+      if (ws) {
+        ws.close();
+      }
+
+      const authToken = getAuthToken();
+      if (!authToken) return;
+
+      const payload = parseJwt(authToken);
+      if (payload && payload.email) {
+        currentUserEmail = payload.email;
+      } else {
+        currentUserEmail = "unknown@example.com";
+      }
+
+      document.getElementById('messages').innerHTML = '';
+      ws = new WebSocket(`ws://localhost:8000/ws/${chatId}?token=${authToken}`);
+
+      ws.onopen = () => {
+        console.log('Подключение установлено');
+        document.getElementById('messageText').disabled = false;
+        document.getElementById('sendButton').disabled = false;
+        document.getElementById('ws-id').textContent = `Чат #${chatId}`;
+        currentChatId = chatId;
+        localStorage.setItem('chatId', chatId);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.action === "new_message") {
+            const messageData = msg.data;
+            displayNewMessage(messageData);
+          } else if (msg.action === "message_read") {
+            const data = msg.data;
+            updateMessageStatus(data.id, data.read);
+          } else if (msg.action === "active_users") {
+            document.getElementById('activeUsers').textContent = msg.data.join(', ');
+          }
+        } catch (e) {
+          console.error("Ошибка обработки сообщения:", e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('Соединение закрыто');
+        document.getElementById('messageText').disabled = true;
+        document.getElementById('sendButton').disabled = true;
+        document.getElementById('ws-id').textContent = 'не подключен';
+        currentChatId = null;
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        alert('Ошибка соединения!');
+      };
+    }
+
+    function sendMessage(event) {
+      event.preventDefault();
+      const input = document.getElementById('messageText');
+      if (ws && ws.readyState === WebSocket.OPEN && input.value.trim()) {
+        const message = {
+          action: "send_message",
+          text: input.value.trim()
+        };
+        ws.send(JSON.stringify(message));
+        input.value = '';
+      }
+    }
+
+    function displayNewMessage(messageData) {
+      const messagesList = document.getElementById('messages');
+      const li = document.createElement('li');
+      li.dataset.messageId = messageData.id;
+      li.textContent = `${messageData.email} (${messageData.timestamp}): ${messageData.text}`;
+
+      const statusSpan = document.createElement('span');
+      statusSpan.classList.add('message-status', messageData.read ? 'status-read' : 'status-unread');
+      statusSpan.textContent = messageData.read ? '✓✓ Прочитано' : '✓ Отправлено';
+      li.appendChild(statusSpan);
+      messagesList.appendChild(li);
+      messagesList.scrollTop = messagesList.scrollHeight;
+
+      if (messageData.email !== currentUserEmail && !messageData.read) {
+        const readReceipt = {
+          action: "read_message",
+          message_id: messageData.id
+        };
+        ws.send(JSON.stringify(readReceipt));
+      }
+    }
+
+    function updateMessageStatus(messageId, readStatus) {
+      const messagesList = document.getElementById('messages');
+      const messageItems = messagesList.querySelectorAll('li');
+      messageItems.forEach(item => {
+        if (item.dataset.messageId == messageId) {
+          const statusSpan = item.querySelector('.message-status');
+          if (statusSpan) {
+            statusSpan.textContent = readStatus ? '✓✓ Прочитано' : '✓ Отправлено';
+            statusSpan.classList.remove('status-unread');
+            statusSpan.classList.add(readStatus ? 'status-read' : 'status-unread');
+          }
+        }
+      });
+    }
+
+    window.onload = () => {
+      const savedChatId = localStorage.getItem('chatId');
+      if (savedChatId) {
+        document.getElementById('chatIdInput').value = savedChatId;
+      }
+    };
+  </script>
+</body>
+</html>
